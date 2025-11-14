@@ -1,8 +1,5 @@
-import uploadSessionsData from "@/services/mockData/uploadSessions.json";
+import { getApperClient } from "@/services/apperClient";
 import { generateFileId, generateThumbnail } from "@/utils/fileHelpers";
-
-let uploadSessions = [...uploadSessionsData];
-let currentSessionId = Math.max(...uploadSessions.map(s => s.Id)) + 1;
 
 // Simulate upload progress for a file
 const simulateUpload = async (file, onProgress) => {
@@ -46,16 +43,11 @@ const simulateUpload = async (file, onProgress) => {
 export const uploadService = {
   // Create new upload session
   createUploadSession: async (files) => {
-    await new Promise(resolve => setTimeout(resolve, 200));
-    
-    const session = {
-      Id: currentSessionId++,
-      totalFiles: files.length,
-      completedFiles: 0,
-      totalSize: files.reduce((total, file) => total + file.size, 0),
-      uploadedSize: 0,
-      startTime: Date.now(),
-      files: files.map(file => ({
+    try {
+      const apperClient = getApperClient();
+      if (!apperClient) throw new Error("ApperClient not initialized");
+      
+      const filesData = files.map(file => ({
         id: generateFileId(),
         name: file.name,
         size: file.size,
@@ -67,25 +59,72 @@ export const uploadService = {
         uploadSpeed: 0,
         errorMessage: null,
         timestamp: Date.now()
-      }))
-    };
-    
-    uploadSessions.unshift(session);
-    return { ...session };
+      }));
+
+      const sessionData = {
+        totalFiles_c: files.length,
+        completedFiles_c: 0,
+        totalSize_c: files.reduce((total, file) => total + file.size, 0),
+        uploadedSize_c: 0,
+        startTime_c: new Date().toISOString(),
+        files_c: JSON.stringify(filesData)
+      };
+
+      const response = await apperClient.createRecord("uploadSessions_c", {
+        records: [sessionData]
+      });
+
+      if (!response.success) {
+        console.error(response.message);
+        throw new Error(response.message);
+      }
+
+      const createdSession = response.results?.[0]?.data;
+      if (!createdSession) throw new Error("Failed to create session");
+
+      return {
+        Id: createdSession.Id,
+        totalFiles: sessionData.totalFiles_c,
+        completedFiles: sessionData.completedFiles_c,
+        totalSize: sessionData.totalSize_c,
+        uploadedSize: sessionData.uploadedSize_c,
+        startTime: sessionData.startTime_c,
+        files: filesData
+      };
+    } catch (error) {
+      console.error("Error creating upload session:", error?.response?.data?.message || error);
+      throw error;
+    }
   },
   
   // Upload individual file
   uploadFile: async (sessionId, fileId, file, onProgress) => {
-    const session = uploadSessions.find(s => s.Id === sessionId);
-    if (!session) throw new Error("Session not found");
-    
-    const fileRecord = session.files.find(f => f.id === fileId);
-    if (!fileRecord) throw new Error("File not found");
-    
-    // Update status to uploading
-    fileRecord.status = "uploading";
-    
     try {
+      const apperClient = getApperClient();
+      if (!apperClient) throw new Error("ApperClient not initialized");
+
+      // Fetch current session
+      const sessionResponse = await apperClient.getRecordById("uploadSessions_c", sessionId, {
+        fields: [
+          { field: { Name: "totalFiles_c" } },
+          { field: { Name: "completedFiles_c" } },
+          { field: { Name: "totalSize_c" } },
+          { field: { Name: "uploadedSize_c" } },
+          { field: { Name: "files_c" } }
+        ]
+      });
+
+      if (!sessionResponse.data) throw new Error("Session not found");
+
+      const session = sessionResponse.data;
+      let filesData = JSON.parse(session.files_c || "[]");
+      const fileRecord = filesData.find(f => f.id === fileId);
+      
+      if (!fileRecord) throw new Error("File not found");
+
+      // Update status to uploading
+      fileRecord.status = "uploading";
+
       // Generate thumbnail if image
       const thumbnail = await generateThumbnail(file);
       fileRecord.thumbnail = thumbnail;
@@ -96,98 +135,245 @@ export const uploadService = {
         fileRecord.uploadSpeed = speed;
         
         // Update session totals
-        const totalUploaded = session.files.reduce((total, f) => {
+        const totalUploaded = filesData.reduce((total, f) => {
           return total + (f.size * (f.uploadProgress / 100));
         }, 0);
-        session.uploadedSize = Math.round(totalUploaded);
+        const uploadedSize = Math.round(totalUploaded);
         
-        onProgress(fileRecord, session);
+        onProgress({ ...fileRecord }, {
+          Id: sessionId,
+          totalFiles: session.totalFiles_c,
+          completedFiles: session.completedFiles_c,
+          totalSize: session.totalSize_c,
+          uploadedSize: uploadedSize,
+          startTime: session.startTime_c,
+          files: filesData
+        });
       });
       
       // Mark as complete
       fileRecord.status = "success";
       fileRecord.url = result.url;
       fileRecord.uploadSpeed = 0;
-      session.completedFiles = session.files.filter(f => f.status === "success").length;
-      
+      const completedCount = filesData.filter(f => f.status === "success").length;
+
+      // Update database
+      const totalUploaded = filesData.reduce((total, f) => {
+        return total + (f.size * (f.uploadProgress / 100));
+      }, 0);
+
+      const updateResponse = await apperClient.updateRecord("uploadSessions_c", {
+        records: [{
+          Id: sessionId,
+          completedFiles_c: completedCount,
+          uploadedSize_c: Math.round(totalUploaded),
+          files_c: JSON.stringify(filesData)
+        }]
+      });
+
+      if (!updateResponse.success) {
+        console.error(updateResponse.message);
+      }
+
       return fileRecord;
     } catch (error) {
-      fileRecord.status = "error";
-      fileRecord.errorMessage = error.message;
-      fileRecord.uploadSpeed = 0;
+      console.error("Error uploading file:", error?.response?.data?.message || error);
       throw error;
     }
   },
   
   // Retry failed upload
   retryUpload: async (sessionId, fileId, file, onProgress) => {
-    const session = uploadSessions.find(s => s.Id === sessionId);
-    if (!session) throw new Error("Session not found");
-    
-    const fileRecord = session.files.find(f => f.id === fileId);
-    if (!fileRecord) throw new Error("File not found");
-    
-    // Reset file state
-    fileRecord.uploadProgress = 0;
-    fileRecord.status = "pending";
-    fileRecord.errorMessage = null;
-    fileRecord.uploadSpeed = 0;
-    
-    return this.uploadFile(sessionId, fileId, file, onProgress);
+    try {
+      const apperClient = getApperClient();
+      if (!apperClient) throw new Error("ApperClient not initialized");
+
+      // Fetch current session
+      const sessionResponse = await apperClient.getRecordById("uploadSessions_c", sessionId, {
+        fields: [{ field: { Name: "files_c" } }]
+      });
+
+      if (!sessionResponse.data) throw new Error("Session not found");
+
+      let filesData = JSON.parse(sessionResponse.data.files_c || "[]");
+      const fileRecord = filesData.find(f => f.id === fileId);
+      
+      if (!fileRecord) throw new Error("File not found");
+
+      // Reset file state
+      fileRecord.uploadProgress = 0;
+      fileRecord.status = "pending";
+      fileRecord.errorMessage = null;
+      fileRecord.uploadSpeed = 0;
+
+      return this.uploadFile(sessionId, fileId, file, onProgress);
+    } catch (error) {
+      console.error("Error retrying upload:", error?.response?.data?.message || error);
+      throw error;
+    }
   },
   
   // Cancel upload
   cancelUpload: async (sessionId, fileId) => {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    const session = uploadSessions.find(s => s.Id === sessionId);
-    if (!session) throw new Error("Session not found");
-    
-    const fileIndex = session.files.findIndex(f => f.id === fileId);
-    if (fileIndex === -1) throw new Error("File not found");
-    
-    // Remove file from session
-    session.files.splice(fileIndex, 1);
-    session.totalFiles = session.files.length;
-    session.totalSize = session.files.reduce((total, f) => total + f.size, 0);
-    
-    // Recalculate session totals
-    session.completedFiles = session.files.filter(f => f.status === "success").length;
-    const totalUploaded = session.files.reduce((total, f) => {
-      return total + (f.size * (f.uploadProgress / 100));
-    }, 0);
-    session.uploadedSize = Math.round(totalUploaded);
-    
-    return session;
+    try {
+      const apperClient = getApperClient();
+      if (!apperClient) throw new Error("ApperClient not initialized");
+
+      // Fetch current session
+      const sessionResponse = await apperClient.getRecordById("uploadSessions_c", sessionId, {
+        fields: [
+          { field: { Name: "totalFiles_c" } },
+          { field: { Name: "completedFiles_c" } },
+          { field: { Name: "totalSize_c" } },
+          { field: { Name: "uploadedSize_c" } },
+          { field: { Name: "files_c" } }
+        ]
+      });
+
+      if (!sessionResponse.data) throw new Error("Session not found");
+
+      const session = sessionResponse.data;
+      let filesData = JSON.parse(session.files_c || "[]");
+      const fileIndex = filesData.findIndex(f => f.id === fileId);
+      
+      if (fileIndex === -1) throw new Error("File not found");
+
+      // Remove file from session
+      filesData.splice(fileIndex, 1);
+      const totalSize = filesData.reduce((total, f) => total + f.size, 0);
+      const completedCount = filesData.filter(f => f.status === "success").length;
+      const totalUploaded = filesData.reduce((total, f) => {
+        return total + (f.size * (f.uploadProgress / 100));
+      }, 0);
+
+      // Update database
+      const updateResponse = await apperClient.updateRecord("uploadSessions_c", {
+        records: [{
+          Id: sessionId,
+          totalFiles_c: filesData.length,
+          totalSize_c: totalSize,
+          completedFiles_c: completedCount,
+          uploadedSize_c: Math.round(totalUploaded),
+          files_c: JSON.stringify(filesData)
+        }]
+      });
+
+      if (!updateResponse.success) {
+        console.error(updateResponse.message);
+      }
+
+      return {
+        Id: sessionId,
+        totalFiles: filesData.length,
+        completedFiles: completedCount,
+        totalSize: totalSize,
+        uploadedSize: Math.round(totalUploaded),
+        startTime: session.startTime_c,
+        files: filesData
+      };
+    } catch (error) {
+      console.error("Error cancelling upload:", error?.response?.data?.message || error);
+      throw error;
+    }
   },
   
   // Get all upload sessions
   getAllSessions: async () => {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    return uploadSessions.map(session => ({ ...session }));
+    try {
+      const apperClient = getApperClient();
+      if (!apperClient) throw new Error("ApperClient not initialized");
+
+      const response = await apperClient.fetchRecords("uploadSessions_c", {
+        fields: [
+          { field: { Name: "totalFiles_c" } },
+          { field: { Name: "completedFiles_c" } },
+          { field: { Name: "totalSize_c" } },
+          { field: { Name: "uploadedSize_c" } },
+          { field: { Name: "startTime_c" } },
+          { field: { Name: "files_c" } }
+        ],
+        pagingInfo: { limit: 100, offset: 0 }
+      });
+
+      if (!response.success) {
+        console.error(response.message);
+        return [];
+      }
+
+      return (response.data || []).map(session => ({
+        Id: session.Id,
+        totalFiles: session.totalFiles_c,
+        completedFiles: session.completedFiles_c,
+        totalSize: session.totalSize_c,
+        uploadedSize: session.uploadedSize_c,
+        startTime: session.startTime_c,
+        files: JSON.parse(session.files_c || "[]")
+      }));
+    } catch (error) {
+      console.error("Error fetching sessions:", error?.response?.data?.message || error);
+      return [];
+    }
   },
   
   // Get session by ID
   getSessionById: async (sessionId) => {
-    await new Promise(resolve => setTimeout(resolve, 200));
-    const session = uploadSessions.find(s => s.Id === sessionId);
-    return session ? { ...session } : null;
+    try {
+      const apperClient = getApperClient();
+      if (!apperClient) throw new Error("ApperClient not initialized");
+
+      const response = await apperClient.getRecordById("uploadSessions_c", sessionId, {
+        fields: [
+          { field: { Name: "totalFiles_c" } },
+          { field: { Name: "completedFiles_c" } },
+          { field: { Name: "totalSize_c" } },
+          { field: { Name: "uploadedSize_c" } },
+          { field: { Name: "startTime_c" } },
+          { field: { Name: "files_c" } }
+        ]
+      });
+
+      if (!response.data) return null;
+
+      const session = response.data;
+      return {
+        Id: session.Id,
+        totalFiles: session.totalFiles_c,
+        completedFiles: session.completedFiles_c,
+        totalSize: session.totalSize_c,
+        uploadedSize: session.uploadedSize_c,
+        startTime: session.startTime_c,
+        files: JSON.parse(session.files_c || "[]")
+      };
+    } catch (error) {
+      console.error("Error fetching session:", error?.response?.data?.message || error);
+      return null;
+    }
   },
   
   // Delete session
   deleteSession: async (sessionId) => {
-    await new Promise(resolve => setTimeout(resolve, 200));
-    const index = uploadSessions.findIndex(s => s.Id === sessionId);
-    if (index === -1) throw new Error("Session not found");
-    
-    uploadSessions.splice(index, 1);
-    return true;
+    try {
+      const apperClient = getApperClient();
+      if (!apperClient) throw new Error("ApperClient not initialized");
+
+      const response = await apperClient.deleteRecord("uploadSessions_c", {
+        RecordIds: [sessionId]
+      });
+
+      if (!response.success) {
+        console.error(response.message);
+        throw new Error(response.message);
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Error deleting session:", error?.response?.data?.message || error);
+      throw error;
+    }
   },
   
   // Copy file URL to clipboard
   copyFileUrl: async (url) => {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
     try {
       await navigator.clipboard.writeText(url);
       return true;

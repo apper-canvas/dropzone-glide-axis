@@ -1,17 +1,33 @@
-import React, { useState, useEffect } from "react";
-import DropZone from "@/components/organisms/DropZone";
-import UploadQueue from "@/components/organisms/UploadQueue";
-import Loading from "@/components/ui/Loading";
-import ErrorView from "@/components/ui/ErrorView";
+import React, { useEffect, useState } from "react";
 import { uploadService } from "@/services/api/uploadService";
 import { toast } from "react-toastify";
+import Loading from "@/components/ui/Loading";
+import ErrorView from "@/components/ui/ErrorView";
+import DropZone from "@/components/organisms/DropZone";
+import UploadQueue from "@/components/organisms/UploadQueue";
 
-const Home = () => {
+export default function Home() {
   const [currentSession, setCurrentSession] = useState(null);
   const [uploadingFiles, setUploadingFiles] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
+  // Load last session on mount
+  useEffect(() => {
+    const loadLastSession = async () => {
+      try {
+        const sessions = await uploadService.getAllSessions();
+        if (sessions && sessions.length > 0) {
+          setCurrentSession(sessions[0]);
+        }
+      } catch (err) {
+        console.info("Failed to load previous sessions");
+      }
+    };
+    loadLastSession();
+  }, []);
+  
+  // File upload handlers
   // File upload handlers
   const handleFilesSelected = async (files) => {
     try {
@@ -215,7 +231,6 @@ const Home = () => {
         </div>
       </div>
     </div>
+</div>
   );
-};
-
-export default Home;
+}
