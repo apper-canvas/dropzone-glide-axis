@@ -228,9 +228,8 @@ export default function Home() {
               <span>Multiple file format support</span>
             </div>
           </div>
-        </div>
+</div>
       </div>
     </div>
-</div>
   );
 }
