@@ -1,0 +1,87 @@
+[
+  {
+    "Id": 1,
+    "totalFiles": 3,
+    "completedFiles": 3,
+    "totalSize": 15728640,
+    "uploadedSize": 15728640,
+    "startTime": 1703875200000,
+    "files": [
+      {
+        "id": "file_001",
+        "name": "presentation.pdf",
+        "size": 5242880,
+        "type": "application/pdf",
+        "uploadProgress": 100,
+        "status": "success",
+        "url": "https://example.com/uploads/presentation.pdf",
+        "thumbnail": null,
+        "uploadSpeed": 0,
+        "errorMessage": null,
+        "timestamp": 1703875200000
+      },
+      {
+        "id": "file_002", 
+        "name": "vacation-photo.jpg",
+        "size": 8388608,
+        "type": "image/jpeg",
+        "uploadProgress": 100,
+        "status": "success", 
+        "url": "https://example.com/uploads/vacation-photo.jpg",
+        "thumbnail": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEA...",
+        "uploadSpeed": 0,
+        "errorMessage": null,
+        "timestamp": 1703875260000
+      },
+      {
+        "id": "file_003",
+        "name": "report.docx",
+        "size": 2097152,
+        "type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "uploadProgress": 100,
+        "status": "success",
+        "url": "https://example.com/uploads/report.docx", 
+        "thumbnail": null,
+        "uploadSpeed": 0,
+        "errorMessage": null,
+        "timestamp": 1703875320000
+      }
+    ]
+  },
+  {
+    "Id": 2,
+    "totalFiles": 2,
+    "completedFiles": 1,
+    "totalSize": 20971520,
+    "uploadedSize": 10485760,
+    "startTime": 1703878800000,
+    "files": [
+      {
+        "id": "file_004",
+        "name": "video-demo.mp4",
+        "size": 10485760,
+        "type": "video/mp4",
+        "uploadProgress": 100,
+        "status": "success",
+        "url": "https://example.com/uploads/video-demo.mp4",
+        "thumbnail": null,
+        "uploadSpeed": 0,
+        "errorMessage": null,
+        "timestamp": 1703878800000
+      },
+      {
+        "id": "file_005",
+        "name": "large-dataset.csv",
+        "size": 10485760,
+        "type": "text/csv",
+        "uploadProgress": 0,
+        "status": "error",
+        "url": null,
+        "thumbnail": null,
+        "uploadSpeed": 0,
+        "errorMessage": "Upload failed due to network timeout",
+        "timestamp": 1703878860000
+      }
+    ]
+  }
+]
